@@ -35,10 +35,6 @@ const API =
   import.meta.env.VITE_API_BASE_URL ||
   "https://qipsv2dwa3.execute-api.ap-southeast-2.amazonaws.com";
 
-// ======================================
-// PUBLIC ATTENDIFY WEBSITE
-// ======================================
-
 const PUBLIC_APP_URL =
   "https://attendify-qr-attendance.vercel.app";
 
@@ -83,17 +79,12 @@ async function readAPIResponse(response) {
 // ======================================
 
 function getRecords(data) {
-  if (!data || typeof data !== "object") {
-    return [];
-  }
-
+  if (!data || typeof data !== "object") return [];
   return Array.isArray(data.records) ? data.records : [];
 }
 
 function getSubjectSummary(data) {
-  if (!data || typeof data !== "object") {
-    return [];
-  }
+  if (!data || typeof data !== "object") return [];
 
   return Array.isArray(data.subject_summary)
     ? data.subject_summary
@@ -116,7 +107,8 @@ function parseQRData(decodedText) {
         session_id,
         qr_token,
         subject:
-          url.searchParams.get("subject") || "Cloud Computing",
+          url.searchParams.get("subject") ||
+          "Artificial Intelligence",
       };
     }
   } catch {
@@ -195,6 +187,11 @@ function App() {
   const [activePage, setActivePage] = useState("Dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // SUBJECT INPUT FOR TEACHER
+  const [subjectName, setSubjectName] = useState(
+    "Artificial Intelligence"
+  );
+
   // QR SESSION
   const [sessionData, setSessionData] = useState(null);
   const [showSession, setShowSession] = useState(false);
@@ -260,7 +257,8 @@ function App() {
       setScannedData({
         session_id,
         qr_token,
-        subject: params.get("subject") || "Cloud Computing",
+        subject:
+          params.get("subject") || "Artificial Intelligence",
       });
 
       setActivePage("Student Scanner");
@@ -276,6 +274,13 @@ function App() {
   // ======================================
 
   async function generateSession() {
+    const selectedSubjectName = subjectName.trim();
+
+    if (!selectedSubjectName) {
+      setError("Please enter a subject name.");
+      return;
+    }
+
     setLoading(true);
     setError("");
     setSessionData(null);
@@ -288,7 +293,7 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          subject: "Cloud Computing",
+          subject: selectedSubjectName,
           teacher_id: "teacher1",
         }),
       });
@@ -299,7 +304,14 @@ function App() {
         throw new Error("Session ID or QR token missing.");
       }
 
-      setSessionData(data);
+      // Preserve the subject entered by the teacher.
+      const finalSessionData = {
+        ...data,
+        subject: data.subject || selectedSubjectName,
+      };
+
+      setSessionData(finalSessionData);
+
     } catch (err) {
       console.error("Session error:", err);
       setError(err.message);
@@ -315,9 +327,6 @@ function App() {
   function getAttendanceURL() {
     if (!sessionData) return "";
 
-    // Always use the permanent public Vercel domain.
-    // Never use the deployment-specific preview URL.
-
     const url = new URL("/", PUBLIC_APP_URL);
 
     url.searchParams.set(
@@ -332,7 +341,7 @@ function App() {
 
     url.searchParams.set(
       "subject",
-      sessionData.subject || "Cloud Computing"
+      sessionData.subject || subjectName
     );
 
     return url.toString();
@@ -594,6 +603,44 @@ function App() {
   ];
 
   // ======================================
+  // SUBJECT INPUT COMPONENT
+  // ======================================
+
+  function SubjectInput() {
+    return (
+      <div className="student-search">
+        <label htmlFor="teacher-subject">
+          <BookOpen size={17} />
+          Subject Name
+        </label>
+
+        <input
+          id="teacher-subject"
+          className="student-input"
+          type="text"
+          value={subjectName}
+          onChange={(e) => setSubjectName(e.target.value)}
+          placeholder="Enter subject name"
+          maxLength={100}
+        />
+
+        <p className="stat-note">
+          Enter the subject for which you want to take attendance.
+        </p>
+
+        <button
+          className="primary-button"
+          onClick={generateSession}
+          disabled={loading || !subjectName.trim()}
+        >
+          <QrCode size={18} />
+          Generate QR Code
+        </button>
+      </div>
+    );
+  }
+
+  // ======================================
   // RENDER APPLICATION
   // ======================================
 
@@ -781,6 +828,8 @@ function App() {
 
             <section className="content-grid">
 
+              {/* WEEKLY ATTENDANCE */}
+
               <div className="panel">
                 <div className="panel-heading">
                   <div>
@@ -818,11 +867,13 @@ function App() {
                 </div>
               </div>
 
+              {/* QUICK QR GENERATION */}
+
               <div className="panel">
                 <div className="panel-heading">
                   <div>
-                    <h3>Quick Actions</h3>
-                    <p>Manage attendance sessions</p>
+                    <h3>Generate Attendance QR</h3>
+                    <p>Create a subject-wise session</p>
                   </div>
                 </div>
 
@@ -831,19 +882,14 @@ function App() {
                     <QrCode size={35} />
                   </div>
 
-                  <h3>Generate QR Code</h3>
+                  <h3>Teacher QR Generator</h3>
 
                   <p>
-                    Create a new attendance session for your students.
+                    Enter your subject name and generate a QR code
+                    for students.
                   </p>
 
-                  <button
-                    className="primary-button"
-                    onClick={generateSession}
-                  >
-                    <Plus size={18} />
-                    Generate QR
-                  </button>
+                  <SubjectInput />
                 </div>
 
                 <div className="session-info">
@@ -903,10 +949,17 @@ function App() {
                         )
                         .slice(0, 5)
                         .map((record, index) => (
-                          <tr key={record.session_id || index}>
+                          <tr
+                            key={
+                              record.session_id ||
+                              index
+                            }
+                          >
                             <td>{record.student_id}</td>
                             <td>{record.subject}</td>
-                            <td>{formatDate(record.check_in_time)}</td>
+                            <td>
+                              {formatDate(record.check_in_time)}
+                            </td>
                             <td>
                               <span className="status present">
                                 {record.status || "Present"}
@@ -924,6 +977,48 @@ function App() {
                   </tbody>
                 </table>
               </div>
+            </section>
+
+          </div>
+        )}
+
+        {/* ==================================
+            QR SESSIONS PAGE
+        ================================== */}
+
+        {activePage === "QR Sessions" && (
+          <div className="dashboard">
+
+            <section className="welcome-section">
+              <div>
+                <span className="eyebrow">TEACHER PORTAL</span>
+                <h1>Create Attendance Session</h1>
+                <p>
+                  Select any subject and generate a unique QR code
+                  for your classroom.
+                </p>
+              </div>
+            </section>
+
+            <section className="panel scanner-panel">
+
+              <div className="qr-action-icon">
+                <QrCode size={35} />
+              </div>
+
+              <h2>Generate Subject QR Code</h2>
+
+              <p>
+                The QR code will be linked to the subject you enter.
+              </p>
+
+              <SubjectInput />
+
+              <div className="session-info">
+                <Clock size={17} />
+                Each generated session expires after 5 minutes.
+              </div>
+
             </section>
 
           </div>
@@ -1051,7 +1146,8 @@ function App() {
                         <User />
                       </div>
                       <h2>
-                        {attendanceData.student_id || attendanceStudentId}
+                        {attendanceData.student_id ||
+                          attendanceStudentId}
                       </h2>
                     </div>
 
@@ -1060,7 +1156,9 @@ function App() {
                         Present Classes
                         <CheckCircle2 />
                       </div>
-                      <h2>{attendanceData.present_count ?? 0}</h2>
+                      <h2>
+                        {attendanceData.present_count ?? 0}
+                      </h2>
                     </div>
 
                     <div className="stat-card">
@@ -1068,7 +1166,9 @@ function App() {
                         Total Classes
                         <BookOpen />
                       </div>
-                      <h2>{attendanceData.total_classes ?? 0}</h2>
+                      <h2>
+                        {attendanceData.total_classes ?? 0}
+                      </h2>
                     </div>
 
                     <div className="stat-card">
@@ -1076,7 +1176,9 @@ function App() {
                         Attendance Percentage
                         <ClipboardCheck />
                       </div>
-                      <h2>{attendanceData.percentage ?? 0}%</h2>
+                      <h2>
+                        {attendanceData.percentage ?? 0}%
+                      </h2>
                     </div>
 
                   </section>
@@ -1086,7 +1188,9 @@ function App() {
                       <div className="panel-heading">
                         <div>
                           <h3>Subject-wise Attendance</h3>
-                          <p>Attendance summary for each subject</p>
+                          <p>
+                            Attendance summary for each subject
+                          </p>
                         </div>
                       </div>
 
@@ -1250,7 +1354,9 @@ function App() {
                             }
                           >
                             {attendanceMode === "teacher" && (
-                              <td>{record.student_id || "N/A"}</td>
+                              <td>
+                                {record.student_id || "N/A"}
+                              </td>
                             )}
 
                             <td>{record.subject || "N/A"}</td>
@@ -1342,11 +1448,13 @@ function App() {
                   <h3>QR Code Recognized!</h3>
 
                   <p>
-                    Subject: {scannedData.subject}
+                    <strong>Subject:</strong>{" "}
+                    {scannedData.subject}
                   </p>
 
                   <p>
-                    Session ID: {scannedData.session_id}
+                    <strong>Session ID:</strong>{" "}
+                    {scannedData.session_id}
                   </p>
 
                   <button
@@ -1384,7 +1492,8 @@ function App() {
 
         {activePage !== "Dashboard" &&
           activePage !== "Attendance" &&
-          activePage !== "Student Scanner" && (
+          activePage !== "Student Scanner" &&
+          activePage !== "QR Sessions" && (
             <div className="empty-page panel">
 
               <div className="qr-action-icon">
@@ -1475,7 +1584,7 @@ function App() {
 
                   <p>
                     <strong>Subject:</strong>{" "}
-                    {sessionData.subject || "Cloud Computing"}
+                    {sessionData.subject}
                   </p>
 
                   <p>
