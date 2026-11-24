@@ -15,7 +15,6 @@ import {
   CheckCircle2,
   XCircle,
   Menu,
-  Plus,
   ArrowLeft,
   Camera,
   Clock,
@@ -80,6 +79,7 @@ async function readAPIResponse(response) {
 
 function getRecords(data) {
   if (!data || typeof data !== "object") return [];
+
   return Array.isArray(data.records) ? data.records : [];
 }
 
@@ -180,6 +180,51 @@ const emptyAttendance = {
 };
 
 // ======================================
+// SUBJECT INPUT COMPONENT
+// IMPORTANT: KEEP OUTSIDE APP()
+// This prevents input focus loss.
+// ======================================
+
+function SubjectInput({
+  subjectName,
+  setSubjectName,
+  generateSession,
+  loading,
+}) {
+  return (
+    <div className="student-search">
+      <label htmlFor="teacher-subject">
+        <BookOpen size={17} />
+        Subject Name
+      </label>
+
+      <input
+        id="teacher-subject"
+        className="student-input"
+        type="text"
+        value={subjectName}
+        onChange={(e) => setSubjectName(e.target.value)}
+        placeholder="Enter subject name"
+        maxLength={100}
+      />
+
+      <p className="stat-note">
+        Enter the subject for which you want to take attendance.
+      </p>
+
+      <button
+        className="primary-button"
+        onClick={generateSession}
+        disabled={loading || !subjectName.trim()}
+      >
+        <QrCode size={18} />
+        {loading ? "Generating..." : "Generate QR Code"}
+      </button>
+    </div>
+  );
+}
+
+// ======================================
 // MAIN APPLICATION
 // ======================================
 
@@ -188,24 +233,29 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   // SUBJECT INPUT FOR TEACHER
+
   const [subjectName, setSubjectName] = useState(
     "Artificial Intelligence"
   );
 
   // QR SESSION
+
   const [sessionData, setSessionData] = useState(null);
   const [showSession, setShowSession] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   // STUDENT SCANNER
+
   const [studentId, setStudentId] = useState("");
   const [scannedData, setScannedData] = useState(null);
   const [scanMessage, setScanMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // ATTENDANCE VIEW
+
   const [attendanceMode, setAttendanceMode] = useState("teacher");
+
   const [attendanceData, setAttendanceData] =
     useState(emptyAttendance);
 
@@ -305,6 +355,7 @@ function App() {
       }
 
       // Preserve the subject entered by the teacher.
+
       const finalSessionData = {
         ...data,
         subject: data.subject || selectedSubjectName,
@@ -314,7 +365,7 @@ function App() {
 
     } catch (err) {
       console.error("Session error:", err);
-      setError(err.message);
+      setError(err.message || "Unable to create session.");
     } finally {
       setLoading(false);
     }
@@ -364,6 +415,7 @@ function App() {
       alert("Student attendance link copied successfully!");
     } catch (err) {
       console.error("Clipboard error:", err);
+
       setError(
         "Unable to copy automatically. Please use the QR code instead."
       );
@@ -442,6 +494,7 @@ function App() {
 
     } catch (err) {
       console.error("Attendance error:", err);
+
       setScanMessage(
         err.message || "Unable to mark attendance."
       );
@@ -601,44 +654,6 @@ function App() {
         .filter(Boolean)
     ),
   ];
-
-  // ======================================
-  // SUBJECT INPUT COMPONENT
-  // ======================================
-
-  function SubjectInput() {
-    return (
-      <div className="student-search">
-        <label htmlFor="teacher-subject">
-          <BookOpen size={17} />
-          Subject Name
-        </label>
-
-        <input
-          id="teacher-subject"
-          className="student-input"
-          type="text"
-          value={subjectName}
-          onChange={(e) => setSubjectName(e.target.value)}
-          placeholder="Enter subject name"
-          maxLength={100}
-        />
-
-        <p className="stat-note">
-          Enter the subject for which you want to take attendance.
-        </p>
-
-        <button
-          className="primary-button"
-          onClick={generateSession}
-          disabled={loading || !subjectName.trim()}
-        >
-          <QrCode size={18} />
-          Generate QR Code
-        </button>
-      </div>
-    );
-  }
 
   // ======================================
   // RENDER APPLICATION
@@ -889,7 +904,12 @@ function App() {
                     for students.
                   </p>
 
-                  <SubjectInput />
+                  <SubjectInput
+                    subjectName={subjectName}
+                    setSubjectName={setSubjectName}
+                    generateSession={generateSession}
+                    loading={loading}
+                  />
                 </div>
 
                 <div className="session-info">
@@ -1012,7 +1032,12 @@ function App() {
                 The QR code will be linked to the subject you enter.
               </p>
 
-              <SubjectInput />
+              <SubjectInput
+                subjectName={subjectName}
+                setSubjectName={setSubjectName}
+                generateSession={generateSession}
+                loading={loading}
+              />
 
               <div className="session-info">
                 <Clock size={17} />
