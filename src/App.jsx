@@ -36,6 +36,13 @@ const API =
   "https://qipsv2dwa3.execute-api.ap-southeast-2.amazonaws.com";
 
 // ======================================
+// PUBLIC ATTENDIFY WEBSITE
+// ======================================
+
+const PUBLIC_APP_URL =
+  "https://attendify-qr-attendance.vercel.app";
+
+// ======================================
 // SAFE API RESPONSE HANDLER
 // ======================================
 
@@ -48,7 +55,6 @@ async function readAPIResponse(response) {
     throw new Error("Invalid response received from AWS.");
   }
 
-  // API Gateway Lambda proxy response
   let data = result;
 
   if (typeof result.body === "string") {
@@ -81,9 +87,7 @@ function getRecords(data) {
     return [];
   }
 
-  const records = data.records;
-
-  return Array.isArray(records) ? records : [];
+  return Array.isArray(data.records) ? data.records : [];
 }
 
 function getSubjectSummary(data) {
@@ -305,16 +309,16 @@ function App() {
   }
 
   // ======================================
-  // CREATE QR ATTENDANCE URL
+  // CREATE PUBLIC QR ATTENDANCE URL
   // ======================================
 
   function getAttendanceURL() {
     if (!sessionData) return "";
 
-    const url = new URL(
-      window.location.pathname,
-      window.location.origin
-    );
+    // Always use the permanent public Vercel domain.
+    // Never use the deployment-specific preview URL.
+
+    const url = new URL("/", PUBLIC_APP_URL);
 
     url.searchParams.set(
       "session_id",
@@ -332,6 +336,29 @@ function App() {
     );
 
     return url.toString();
+  }
+
+  // ======================================
+  // COPY STUDENT ATTENDANCE LINK
+  // ======================================
+
+  async function copyAttendanceLink() {
+    const attendanceURL = getAttendanceURL();
+
+    if (!attendanceURL) {
+      setError("Attendance link is not available.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(attendanceURL);
+      alert("Student attendance link copied successfully!");
+    } catch (err) {
+      console.error("Clipboard error:", err);
+      setError(
+        "Unable to copy automatically. Please use the QR code instead."
+      );
+    }
   }
 
   // ======================================
@@ -387,10 +414,11 @@ function App() {
       const data = await readAPIResponse(response);
 
       setScanMessage(
-        `SUCCESS! Attendance marked for ${data.student_id || studentId}.`
+        `SUCCESS! Attendance marked for ${
+          data.student_id || studentId
+        }.`
       );
 
-      // Keep the submitted ID available for viewing attendance
       setAttendanceStudentId(studentId.trim());
       setAttendanceMode("student");
 
@@ -405,7 +433,9 @@ function App() {
 
     } catch (err) {
       console.error("Attendance error:", err);
-      setScanMessage(err.message || "Unable to mark attendance.");
+      setScanMessage(
+        err.message || "Unable to mark attendance."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -424,7 +454,6 @@ function App() {
       const params = new URLSearchParams();
 
       if (mode === "teacher") {
-        // Request all attendance records
         params.set("view", "all");
       } else {
         if (!id.trim()) {
@@ -447,7 +476,6 @@ function App() {
 
       const data = await readAPIResponse(response);
 
-      // Protect against null or malformed API responses
       const safeData = {
         ...emptyAttendance,
         ...data,
@@ -459,9 +487,11 @@ function App() {
 
     } catch (err) {
       console.error("Attendance fetch error:", err);
+
       setAttendanceError(
         err.message || "Unable to retrieve attendance."
       );
+
       setAttendanceData(emptyAttendance);
     } finally {
       setAttendanceLoading(false);
@@ -479,7 +509,7 @@ function App() {
         attendanceStudentId
       );
     }
-    // Fetch when the attendance page or mode changes.
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePage, attendanceMode]);
 
@@ -930,8 +960,6 @@ function App() {
               </button>
             </section>
 
-            {/* MODE SWITCH */}
-
             <section className="panel">
               <div className="panel-heading">
                 <div>
@@ -966,8 +994,6 @@ function App() {
                 </button>
               </div>
 
-              {/* STUDENT ID SEARCH */}
-
               {attendanceMode === "student" && (
                 <div className="student-search">
                   <label>Enter Student ID</label>
@@ -999,15 +1025,11 @@ function App() {
               )}
             </section>
 
-            {/* LOADING */}
-
             {attendanceLoading && (
               <div className="panel">
                 <p>Loading attendance records from AWS...</p>
               </div>
             )}
-
-            {/* ERROR */}
 
             {attendanceError && (
               <div className="panel">
@@ -1016,8 +1038,6 @@ function App() {
                 </p>
               </div>
             )}
-
-            {/* STUDENT SUMMARY */}
 
             {!attendanceLoading &&
               !attendanceError &&
@@ -1030,7 +1050,9 @@ function App() {
                         Student ID
                         <User />
                       </div>
-                      <h2>{attendanceData.student_id || attendanceStudentId}</h2>
+                      <h2>
+                        {attendanceData.student_id || attendanceStudentId}
+                      </h2>
                     </div>
 
                     <div className="stat-card">
@@ -1058,8 +1080,6 @@ function App() {
                     </div>
 
                   </section>
-
-                  {/* SUBJECT SUMMARY */}
 
                   {getSubjectSummary(attendanceData).length > 0 && (
                     <section className="panel">
@@ -1103,8 +1123,6 @@ function App() {
                   )}
                 </>
               )}
-
-            {/* TEACHER SUMMARY */}
 
             {!attendanceLoading &&
               !attendanceError &&
@@ -1151,9 +1169,9 @@ function App() {
                     <h2>
                       {
                         new Set(
-                          allRecords.map(
-                            (record) => record.student_id
-                          ).filter(Boolean)
+                          allRecords
+                            .map((record) => record.student_id)
+                            .filter(Boolean)
                         ).size
                       }
                     </h2>
@@ -1161,8 +1179,6 @@ function App() {
 
                 </section>
               )}
-
-            {/* ATTENDANCE HISTORY */}
 
             {!attendanceLoading && !attendanceError && (
               <section className="panel attendance-panel">
@@ -1185,8 +1201,6 @@ function App() {
                     </p>
                   </div>
                 </div>
-
-                {/* SUBJECT FILTER */}
 
                 {subjectOptions.length > 0 && (
                   <div className="student-search">
@@ -1482,16 +1496,16 @@ function App() {
 
                   <button
                     className="primary-button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(
-                        getAttendanceURL()
-                      );
-                    }}
+                    onClick={copyAttendanceLink}
                   >
                     Copy Student Attendance Link
                   </button>
 
                   <p>Display this QR code to your students.</p>
+
+                  <p className="session-info">
+                    Public URL: {PUBLIC_APP_URL}
+                  </p>
                 </>
               )}
 
