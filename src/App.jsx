@@ -20,18 +20,121 @@ import {
   Camera,
   Clock,
   Smartphone,
+  RefreshCw,
+  User,
+  BookOpen,
 } from "lucide-react";
 
 import "./App.css";
 
-// AWS API Gateway
+// ======================================
+// AWS API CONFIGURATION
+// ======================================
+
 const API =
   import.meta.env.VITE_API_BASE_URL ||
   "https://qipsv2dwa3.execute-api.ap-southeast-2.amazonaws.com";
 
-// --------------------------------------
-// QR SCANNER COMPONENT
-// --------------------------------------
+// ======================================
+// SAFE API RESPONSE HANDLER
+// ======================================
+
+async function readAPIResponse(response) {
+  let result;
+
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error("Invalid response received from AWS.");
+  }
+
+  // API Gateway Lambda proxy response
+  let data = result;
+
+  if (typeof result.body === "string") {
+    try {
+      data = JSON.parse(result.body);
+    } catch {
+      data = {};
+    }
+  } else if (result.body && typeof result.body === "object") {
+    data = result.body;
+  }
+
+  const statusCode = result.statusCode || response.status;
+
+  if (!response.ok || statusCode >= 400) {
+    throw new Error(
+      data.error || data.message || "AWS request failed."
+    );
+  }
+
+  return data || {};
+}
+
+// ======================================
+// SAFE ATTENDANCE DATA HANDLER
+// ======================================
+
+function getRecords(data) {
+  if (!data || typeof data !== "object") {
+    return [];
+  }
+
+  const records = data.records;
+
+  return Array.isArray(records) ? records : [];
+}
+
+function getSubjectSummary(data) {
+  if (!data || typeof data !== "object") {
+    return [];
+  }
+
+  return Array.isArray(data.subject_summary)
+    ? data.subject_summary
+    : [];
+}
+
+// ======================================
+// QR DATA PARSER
+// ======================================
+
+function parseQRData(decodedText) {
+  try {
+    const url = new URL(decodedText);
+
+    const session_id = url.searchParams.get("session_id");
+    const qr_token = url.searchParams.get("qr_token");
+
+    if (session_id && qr_token) {
+      return {
+        session_id,
+        qr_token,
+        subject:
+          url.searchParams.get("subject") || "Cloud Computing",
+      };
+    }
+  } catch {
+    // Try JSON format
+  }
+
+  try {
+    const data = JSON.parse(decodedText);
+
+    if (data.session_id && data.qr_token) {
+      return data;
+    }
+  } catch {
+    // Invalid QR
+  }
+
+  throw new Error("Invalid attendance QR code.");
+}
+
+// ======================================
+// QR SCANNER
+// ======================================
 
 function StudentScanner({ onScan }) {
   useEffect(() => {
@@ -65,86 +168,69 @@ function StudentScanner({ onScan }) {
   );
 }
 
-// --------------------------------------
-// READ QR DATA
-// --------------------------------------
+// ======================================
+// INITIAL ATTENDANCE STATE
+// ======================================
 
-function parseQRData(decodedText) {
-  try {
-    // QR code containing a website URL
-    const url = new URL(decodedText);
+const emptyAttendance = {
+  view: "",
+  student_id: "",
+  subject: "",
+  present_count: 0,
+  total_classes: 0,
+  percentage: 0,
+  subject_summary: [],
+  records: [],
+};
 
-    const session_id = url.searchParams.get("session_id");
-    const qr_token = url.searchParams.get("qr_token");
-
-    if (session_id && qr_token) {
-      return {
-        session_id,
-        qr_token,
-        subject: url.searchParams.get("subject") || "Cloud Computing",
-      };
-    }
-  } catch (error) {
-    // Try JSON format below
-  }
-
-  // Backward compatibility with old JSON QR codes
-  try {
-    const data = JSON.parse(decodedText);
-
-    if (data.session_id && data.qr_token) {
-      return data;
-    }
-  } catch (error) {
-    // Invalid QR
-  }
-
-  throw new Error("Invalid attendance QR code");
-}
-
-// --------------------------------------
-// API RESPONSE HANDLER
-// --------------------------------------
-
-async function readAPIResponse(response) {
-  const result = await response.json();
-
-  const data =
-    typeof result.body === "string"
-      ? JSON.parse(result.body)
-      : result.body || result;
-
-  if (
-    !response.ok ||
-    (result.statusCode && result.statusCode >= 400)
-  ) {
-    throw new Error(
-      data.error ||
-      data.message ||
-      "AWS request failed"
-    );
-  }
-
-  return data;
-}
-
-// --------------------------------------
+// ======================================
 // MAIN APPLICATION
-// --------------------------------------
+// ======================================
 
 function App() {
   const [activePage, setActivePage] = useState("Dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // QR SESSION
   const [sessionData, setSessionData] = useState(null);
   const [showSession, setShowSession] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // STUDENT SCANNER
   const [studentId, setStudentId] = useState("");
   const [scannedData, setScannedData] = useState(null);
   const [scanMessage, setScanMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // ATTENDANCE VIEW
+  const [attendanceMode, setAttendanceMode] = useState("teacher");
+  const [attendanceData, setAttendanceData] =
+    useState(emptyAttendance);
+
+  const [attendanceStudentId, setAttendanceStudentId] =
+    useState("STU001");
+
+  const [attendanceLoading, setAttendanceLoading] =
+    useState(false);
+
+  const [attendanceError, setAttendanceError] = useState("");
+
+  const [selectedSubject, setSelectedSubject] =
+    useState("all");
+
+  // ======================================
+  // NAVIGATION
+  // ======================================
+
+  const navigation = [
+    { name: "Dashboard", icon: LayoutDashboard },
+    { name: "Students", icon: Users },
+    { name: "Attendance", icon: ClipboardCheck },
+    { name: "QR Sessions", icon: QrCode },
+    { name: "Student Scanner", icon: Camera },
+    { name: "Settings", icon: Settings },
+  ];
 
   const weeklyData = [
     { day: "Mon", attendance: 72 },
@@ -156,51 +242,9 @@ function App() {
     { day: "Sun", attendance: 82 },
   ];
 
-  const students = [
-    {
-      id: "STU001",
-      name: "Aarav Sharma",
-      subject: "Cloud Computing",
-      status: "Present",
-    },
-    {
-      id: "STU002",
-      name: "Priya Patil",
-      subject: "Cloud Computing",
-      status: "Present",
-    },
-    {
-      id: "STU003",
-      name: "Rahul Deshmukh",
-      subject: "Cloud Computing",
-      status: "Absent",
-    },
-    {
-      id: "STU004",
-      name: "Sneha Kulkarni",
-      subject: "Cloud Computing",
-      status: "Present",
-    },
-    {
-      id: "STU005",
-      name: "Aditya Joshi",
-      subject: "Cloud Computing",
-      status: "Present",
-    },
-  ];
-
-  const navigation = [
-    { name: "Dashboard", icon: LayoutDashboard },
-    { name: "Students", icon: Users },
-    { name: "Attendance", icon: ClipboardCheck },
-    { name: "QR Sessions", icon: QrCode },
-    { name: "Student Scanner", icon: Camera },
-    { name: "Settings", icon: Settings },
-  ];
-
-  // --------------------------------------
-  // AUTOMATIC STUDENT REDIRECTION
-  // --------------------------------------
+  // ======================================
+  // AUTOMATIC QR REDIRECTION
+  // ======================================
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -223,9 +267,9 @@ function App() {
     }
   }, []);
 
-  // --------------------------------------
-  // GENERATE ATTENDANCE SESSION
-  // --------------------------------------
+  // ======================================
+  // GENERATE QR SESSION
+  // ======================================
 
   async function generateSession() {
     setLoading(true);
@@ -248,21 +292,21 @@ function App() {
       const data = await readAPIResponse(response);
 
       if (!data.session_id || !data.qr_token) {
-        throw new Error("Session ID or QR token missing");
+        throw new Error("Session ID or QR token missing.");
       }
 
       setSessionData(data);
     } catch (err) {
       console.error("Session error:", err);
-      setError(err.message || "Unable to connect to AWS");
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   }
 
-  // --------------------------------------
-  // CREATE WEBSITE URL FOR QR CODE
-  // --------------------------------------
+  // ======================================
+  // CREATE QR ATTENDANCE URL
+  // ======================================
 
   function getAttendanceURL() {
     if (!sessionData) return "";
@@ -290,9 +334,9 @@ function App() {
     return url.toString();
   }
 
-  // --------------------------------------
+  // ======================================
   // SCAN QR CODE
-  // --------------------------------------
+  // ======================================
 
   const handleScan = useCallback((decodedText) => {
     try {
@@ -309,9 +353,9 @@ function App() {
     }
   }, []);
 
-  // --------------------------------------
-  // MARK STUDENT ATTENDANCE
-  // --------------------------------------
+  // ======================================
+  // MARK ATTENDANCE
+  // ======================================
 
   async function markAttendance() {
     if (!studentId.trim()) {
@@ -343,13 +387,16 @@ function App() {
       const data = await readAPIResponse(response);
 
       setScanMessage(
-        `SUCCESS! Attendance marked for ${data.student_id}.`
+        `SUCCESS! Attendance marked for ${data.student_id || studentId}.`
       );
+
+      // Keep the submitted ID available for viewing attendance
+      setAttendanceStudentId(studentId.trim());
+      setAttendanceMode("student");
 
       setScannedData(null);
       setStudentId("");
 
-      // Remove QR parameters after successful submission
       window.history.replaceState(
         {},
         document.title,
@@ -358,18 +405,96 @@ function App() {
 
     } catch (err) {
       console.error("Attendance error:", err);
-
-      setScanMessage(
-        err.message || "Unable to mark attendance."
-      );
+      setScanMessage(err.message || "Unable to mark attendance.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  // --------------------------------------
+  // ======================================
+  // FETCH ATTENDANCE FROM AWS
+  // ======================================
+
+  async function fetchAttendance(mode, id = "") {
+    setAttendanceLoading(true);
+    setAttendanceError("");
+    setAttendanceData(emptyAttendance);
+
+    try {
+      const params = new URLSearchParams();
+
+      if (mode === "teacher") {
+        // Request all attendance records
+        params.set("view", "all");
+      } else {
+        if (!id.trim()) {
+          throw new Error("Please enter a Student ID.");
+        }
+
+        params.set("view", "student");
+        params.set("student_id", id.trim());
+      }
+
+      const response = await fetch(
+        `${API}/attendance?${params.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const data = await readAPIResponse(response);
+
+      // Protect against null or malformed API responses
+      const safeData = {
+        ...emptyAttendance,
+        ...data,
+        records: getRecords(data),
+        subject_summary: getSubjectSummary(data),
+      };
+
+      setAttendanceData(safeData);
+
+    } catch (err) {
+      console.error("Attendance fetch error:", err);
+      setAttendanceError(
+        err.message || "Unable to retrieve attendance."
+      );
+      setAttendanceData(emptyAttendance);
+    } finally {
+      setAttendanceLoading(false);
+    }
+  }
+
+  // ======================================
+  // ATTENDANCE PAGE INITIAL LOAD
+  // ======================================
+
+  useEffect(() => {
+    if (activePage === "Attendance") {
+      fetchAttendance(
+        attendanceMode,
+        attendanceStudentId
+      );
+    }
+    // Fetch when the attendance page or mode changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePage, attendanceMode]);
+
+  // ======================================
+  // SWITCH ATTENDANCE MODE
+  // ======================================
+
+  function switchAttendanceMode(mode) {
+    setAttendanceMode(mode);
+    setSelectedSubject("all");
+  }
+
+  // ======================================
   // STUDENT PAGE RESET
-  // --------------------------------------
+  // ======================================
 
   function closeScanner() {
     setScannedData(null);
@@ -385,17 +510,30 @@ function App() {
     setActivePage("Dashboard");
   }
 
-  // --------------------------------------
+  // ======================================
+  // FORMAT DATE
+  // ======================================
+
+  function formatDate(value) {
+    if (!value) return "N/A";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    return date.toLocaleString("en-IN");
+  }
+
+  // ======================================
   // EXPIRY DISPLAY
-  // --------------------------------------
+  // ======================================
 
   function formatExpiry(value) {
     if (!value) return "5 minutes after creation";
 
-    const date =
-      typeof value === "number"
-        ? new Date(value)
-        : new Date(value);
+    const date = new Date(value);
 
     if (Number.isNaN(date.getTime())) {
       return String(value);
@@ -404,9 +542,30 @@ function App() {
     return date.toLocaleString("en-IN");
   }
 
-  // --------------------------------------
-  // RENDER
-  // --------------------------------------
+  // ======================================
+  // FILTER RECORDS
+  // ======================================
+
+  const allRecords = getRecords(attendanceData);
+
+  const filteredRecords =
+    selectedSubject === "all"
+      ? allRecords
+      : allRecords.filter(
+          (record) => record.subject === selectedSubject
+        );
+
+  const subjectOptions = [
+    ...new Set(
+      allRecords
+        .map((record) => record.subject)
+        .filter(Boolean)
+    ),
+  ];
+
+  // ======================================
+  // RENDER APPLICATION
+  // ======================================
 
   return (
     <div className="app-container">
@@ -512,7 +671,9 @@ function App() {
           </div>
         </header>
 
-        {/* DASHBOARD */}
+        {/* ==================================
+            DASHBOARD
+        ================================== */}
 
         {activePage === "Dashboard" && (
           <div className="dashboard">
@@ -531,8 +692,6 @@ function App() {
                 {new Date().toLocaleDateString("en-IN")}
               </div>
             </section>
-
-            {/* STATISTICS */}
 
             <section className="stats-grid">
 
@@ -590,8 +749,6 @@ function App() {
 
             </section>
 
-            {/* CHART AND QUICK ACTIONS */}
-
             <section className="content-grid">
 
               <div className="panel">
@@ -613,9 +770,7 @@ function App() {
                         className="bar-column"
                         key={item.day}
                       >
-                        <strong>
-                          {item.attendance}%
-                        </strong>
+                        <strong>{item.attendance}%</strong>
 
                         <div className="bar-track">
                           <div
@@ -669,49 +824,73 @@ function App() {
 
             </section>
 
-            {/* RECENT ATTENDANCE */}
+            {/* RECENT LIVE ATTENDANCE */}
 
             <section className="panel attendance-panel">
               <div className="panel-heading">
                 <div>
                   <h3>Recent Attendance</h3>
-                  <p>Sample attendance records</p>
+                  <p>Records retrieved from AWS</p>
                 </div>
 
                 <button
                   className="view-button"
-                  onClick={() => setActivePage("Attendance")}
+                  onClick={() => {
+                    setAttendanceMode("teacher");
+                    setActivePage("Attendance");
+                  }}
                 >
                   View All
                 </button>
               </div>
+
+              <button
+                className="view-button"
+                onClick={() => fetchAttendance("teacher")}
+              >
+                <RefreshCw size={15} />
+                Refresh Records
+              </button>
 
               <div className="table-wrapper">
                 <table>
                   <thead>
                     <tr>
                       <th>Student ID</th>
-                      <th>Student Name</th>
                       <th>Subject</th>
+                      <th>Date & Time</th>
                       <th>Status</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {students.map((student) => (
-                      <tr key={student.id}>
-                        <td>{student.id}</td>
-                        <td>{student.name}</td>
-                        <td>{student.subject}</td>
-                        <td>
-                          <span
-                            className={`status ${student.status.toLowerCase()}`}
-                          >
-                            {student.status}
-                          </span>
+                    {allRecords.length > 0 ? (
+                      [...allRecords]
+                        .sort((a, b) =>
+                          (b.check_in_time || "").localeCompare(
+                            a.check_in_time || ""
+                          )
+                        )
+                        .slice(0, 5)
+                        .map((record, index) => (
+                          <tr key={record.session_id || index}>
+                            <td>{record.student_id}</td>
+                            <td>{record.subject}</td>
+                            <td>{formatDate(record.check_in_time)}</td>
+                            <td>
+                              <span className="status present">
+                                {record.status || "Present"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                    ) : (
+                      <tr>
+                        <td colSpan="4">
+                          Open Attendance to load live AWS records.
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -720,19 +899,397 @@ function App() {
           </div>
         )}
 
-        {/* STUDENT SCANNER */}
+        {/* ==================================
+            ATTENDANCE PAGE
+        ================================== */}
+
+        {activePage === "Attendance" && (
+          <div className="dashboard">
+
+            <section className="welcome-section">
+              <div>
+                <span className="eyebrow">ATTENDANCE MANAGEMENT</span>
+                <h1>Attendance Records</h1>
+                <p>
+                  View teacher records and individual student attendance.
+                </p>
+              </div>
+
+              <button
+                className="primary-button"
+                onClick={() =>
+                  fetchAttendance(
+                    attendanceMode,
+                    attendanceStudentId
+                  )
+                }
+                disabled={attendanceLoading}
+              >
+                <RefreshCw size={17} />
+                Refresh
+              </button>
+            </section>
+
+            {/* MODE SWITCH */}
+
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <h3>Attendance View</h3>
+                  <p>Select the records you want to view.</p>
+                </div>
+              </div>
+
+              <div className="attendance-switch">
+                <button
+                  className={
+                    attendanceMode === "teacher"
+                      ? "primary-button"
+                      : "view-button"
+                  }
+                  onClick={() => switchAttendanceMode("teacher")}
+                >
+                  <Users size={17} />
+                  Teacher View
+                </button>
+
+                <button
+                  className={
+                    attendanceMode === "student"
+                      ? "primary-button"
+                      : "view-button"
+                  }
+                  onClick={() => switchAttendanceMode("student")}
+                >
+                  <User size={17} />
+                  Student View
+                </button>
+              </div>
+
+              {/* STUDENT ID SEARCH */}
+
+              {attendanceMode === "student" && (
+                <div className="student-search">
+                  <label>Enter Student ID</label>
+
+                  <div className="student-search-row">
+                    <input
+                      className="student-input"
+                      value={attendanceStudentId}
+                      onChange={(e) =>
+                        setAttendanceStudentId(e.target.value)
+                      }
+                      placeholder="Example: STU001"
+                    />
+
+                    <button
+                      className="primary-button"
+                      onClick={() =>
+                        fetchAttendance(
+                          "student",
+                          attendanceStudentId
+                        )
+                      }
+                      disabled={attendanceLoading}
+                    >
+                      Search
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* LOADING */}
+
+            {attendanceLoading && (
+              <div className="panel">
+                <p>Loading attendance records from AWS...</p>
+              </div>
+            )}
+
+            {/* ERROR */}
+
+            {attendanceError && (
+              <div className="panel">
+                <p className="scan-message">
+                  {attendanceError}
+                </p>
+              </div>
+            )}
+
+            {/* STUDENT SUMMARY */}
+
+            {!attendanceLoading &&
+              !attendanceError &&
+              attendanceMode === "student" && (
+                <>
+                  <section className="stats-grid">
+
+                    <div className="stat-card">
+                      <div className="stat-top">
+                        Student ID
+                        <User />
+                      </div>
+                      <h2>{attendanceData.student_id || attendanceStudentId}</h2>
+                    </div>
+
+                    <div className="stat-card">
+                      <div className="stat-top">
+                        Present Classes
+                        <CheckCircle2 />
+                      </div>
+                      <h2>{attendanceData.present_count ?? 0}</h2>
+                    </div>
+
+                    <div className="stat-card">
+                      <div className="stat-top">
+                        Total Classes
+                        <BookOpen />
+                      </div>
+                      <h2>{attendanceData.total_classes ?? 0}</h2>
+                    </div>
+
+                    <div className="stat-card">
+                      <div className="stat-top">
+                        Attendance Percentage
+                        <ClipboardCheck />
+                      </div>
+                      <h2>{attendanceData.percentage ?? 0}%</h2>
+                    </div>
+
+                  </section>
+
+                  {/* SUBJECT SUMMARY */}
+
+                  {getSubjectSummary(attendanceData).length > 0 && (
+                    <section className="panel">
+                      <div className="panel-heading">
+                        <div>
+                          <h3>Subject-wise Attendance</h3>
+                          <p>Attendance summary for each subject</p>
+                        </div>
+                      </div>
+
+                      <div className="table-wrapper">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Subject</th>
+                              <th>Present</th>
+                              <th>Total Classes</th>
+                              <th>Percentage</th>
+                            </tr>
+                          </thead>
+
+                          <tbody>
+                            {getSubjectSummary(attendanceData).map(
+                              (item, index) => (
+                                <tr key={item.subject || index}>
+                                  <td>{item.subject}</td>
+                                  <td>{item.present_count}</td>
+                                  <td>{item.total_classes}</td>
+                                  <td>
+                                    <strong>
+                                      {item.percentage}%
+                                    </strong>
+                                  </td>
+                                </tr>
+                              )
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  )}
+                </>
+              )}
+
+            {/* TEACHER SUMMARY */}
+
+            {!attendanceLoading &&
+              !attendanceError &&
+              attendanceMode === "teacher" && (
+                <section className="stats-grid">
+
+                  <div className="stat-card">
+                    <div className="stat-top">
+                      Total Attendance Records
+                      <ClipboardCheck />
+                    </div>
+                    <h2>{allRecords.length}</h2>
+                  </div>
+
+                  <div className="stat-card">
+                    <div className="stat-top">
+                      Present Records
+                      <CheckCircle2 />
+                    </div>
+                    <h2>
+                      {
+                        allRecords.filter(
+                          (record) =>
+                            String(record.status || "present").toLowerCase() ===
+                            "present"
+                        ).length
+                      }
+                    </h2>
+                  </div>
+
+                  <div className="stat-card">
+                    <div className="stat-top">
+                      Subjects
+                      <BookOpen />
+                    </div>
+                    <h2>{subjectOptions.length}</h2>
+                  </div>
+
+                  <div className="stat-card">
+                    <div className="stat-top">
+                      Students Recorded
+                      <Users />
+                    </div>
+                    <h2>
+                      {
+                        new Set(
+                          allRecords.map(
+                            (record) => record.student_id
+                          ).filter(Boolean)
+                        ).size
+                      }
+                    </h2>
+                  </div>
+
+                </section>
+              )}
+
+            {/* ATTENDANCE HISTORY */}
+
+            {!attendanceLoading && !attendanceError && (
+              <section className="panel attendance-panel">
+
+                <div className="panel-heading">
+                  <div>
+                    <h3>
+                      {attendanceMode === "teacher"
+                        ? "All Student Attendance"
+                        : "My Attendance History"}
+                    </h3>
+
+                    <p>
+                      {attendanceMode === "teacher"
+                        ? "Attendance records stored in DynamoDB"
+                        : `Attendance history for ${
+                            attendanceData.student_id ||
+                            attendanceStudentId
+                          }`}
+                    </p>
+                  </div>
+                </div>
+
+                {/* SUBJECT FILTER */}
+
+                {subjectOptions.length > 0 && (
+                  <div className="student-search">
+                    <label>Filter by Subject</label>
+
+                    <select
+                      className="student-input"
+                      value={selectedSubject}
+                      onChange={(e) =>
+                        setSelectedSubject(e.target.value)
+                      }
+                    >
+                      <option value="all">All Subjects</option>
+
+                      {subjectOptions.map((subject) => (
+                        <option key={subject} value={subject}>
+                          {subject}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        {attendanceMode === "teacher" && (
+                          <th>Student ID</th>
+                        )}
+
+                        <th>Subject</th>
+                        <th>Session ID</th>
+                        <th>Date & Time</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {filteredRecords.length > 0 ? (
+                        filteredRecords.map((record, index) => (
+                          <tr
+                            key={
+                              record.session_id +
+                              record.student_id +
+                              index
+                            }
+                          >
+                            {attendanceMode === "teacher" && (
+                              <td>{record.student_id || "N/A"}</td>
+                            )}
+
+                            <td>{record.subject || "N/A"}</td>
+
+                            <td>
+                              {record.session_id
+                                ? record.session_id.slice(0, 12) + "..."
+                                : "N/A"}
+                            </td>
+
+                            <td>
+                              {formatDate(record.check_in_time)}
+                            </td>
+
+                            <td>
+                              <span className="status present">
+                                {record.status || "Present"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={
+                              attendanceMode === "teacher" ? 5 : 4
+                            }
+                          >
+                            No attendance records found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+              </section>
+            )}
+
+          </div>
+        )}
+
+        {/* ==================================
+            STUDENT SCANNER PAGE
+        ================================== */}
 
         {activePage === "Student Scanner" && (
           <div className="dashboard">
 
             <section className="welcome-section">
               <div>
-                <span className="eyebrow">
-                  STUDENT PORTAL
-                </span>
-
+                <span className="eyebrow">STUDENT PORTAL</span>
                 <h1>Mark Your Attendance</h1>
-
                 <p>
                   Scan the QR code displayed by your teacher.
                 </p>
@@ -747,23 +1304,18 @@ function App() {
 
               <h2>Student QR Scanner</h2>
 
-              <p>
-                Enter your registered Student ID.
-              </p>
+              <p>Enter your registered Student ID.</p>
 
               <input
                 className="student-input"
                 value={studentId}
-                onChange={(e) =>
-                  setStudentId(e.target.value)
-                }
+                onChange={(e) => setStudentId(e.target.value)}
                 placeholder="Example: STU001"
               />
 
               {!scannedData && (
                 <>
                   <h3>Scan Teacher's QR Code</h3>
-
                   <StudentScanner onScan={handleScan} />
                 </>
               )}
@@ -771,15 +1323,12 @@ function App() {
               {scannedData && (
                 <div className="scanned-details">
 
-                  <CheckCircle2
-                    size={35}
-                    color="#27a56a"
-                  />
+                  <CheckCircle2 size={35} color="#27a56a" />
 
                   <h3>QR Code Recognized!</h3>
 
                   <p>
-                    Subject: {scannedData.subject || "Cloud Computing"}
+                    Subject: {scannedData.subject}
                   </p>
 
                   <p>
@@ -795,13 +1344,12 @@ function App() {
                       ? "Submitting..."
                       : "Mark My Attendance"}
                   </button>
+
                 </div>
               )}
 
               {scanMessage && (
-                <p className="scan-message">
-                  {scanMessage}
-                </p>
+                <p className="scan-message">{scanMessage}</p>
               )}
 
               <button
@@ -816,9 +1364,12 @@ function App() {
           </div>
         )}
 
-        {/* OTHER PAGES */}
+        {/* ==================================
+            OTHER PAGES
+        ================================== */}
 
         {activePage !== "Dashboard" &&
+          activePage !== "Attendance" &&
           activePage !== "Student Scanner" && (
             <div className="empty-page panel">
 
@@ -842,7 +1393,9 @@ function App() {
             </div>
           )}
 
-        {/* QR SESSION MODAL */}
+        {/* ==================================
+            QR SESSION MODAL
+        ================================== */}
 
         {showSession && (
           <div
@@ -870,10 +1423,7 @@ function App() {
 
               {!loading && error && (
                 <>
-                  <XCircle
-                    size={45}
-                    color="#e35e67"
-                  />
+                  <XCircle size={45} color="#e35e67" />
 
                   <h2>Session Creation Failed</h2>
 
@@ -941,9 +1491,7 @@ function App() {
                     Copy Student Attendance Link
                   </button>
 
-                  <p>
-                    Display this QR code to your students.
-                  </p>
+                  <p>Display this QR code to your students.</p>
                 </>
               )}
 

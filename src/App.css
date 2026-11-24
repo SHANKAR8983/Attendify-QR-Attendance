@@ -742,3 +742,68 @@ td:nth-child(2) {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* Attendance view switch */
+
+.attendance-switch {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+
+/* Student search */
+
+.student-search {
+  margin: 22px 0;
+}
+
+.student-search label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.student-search-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.student-search-row .student-input {
+  flex: 1;
+  min-width: 180px;
+}
+
+/* Attendance table */
+
+.attendance-panel {
+  margin-top: 24px;
+}
+
+.attendance-panel table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.attendance-panel th,
+.attendance-panel td {
+  padding: 14px;
+  text-align: left;
+}
+
+.attendance-panel td {
+  word-break: break-word;
+}
+
+/* Responsive attendance buttons */
+
+@media (max-width: 600px) {
+  .attendance-switch {
+    flex-direction: column;
+  }
+
+  .student-search-row {
+    flex-direction: column;
+  }
+}
